@@ -1,9 +1,9 @@
 import binascii
 import os
+from argparse import Namespace
 from datetime import datetime
 
 import flask_login as login
-import pytz
 from flask import current_app
 from sqlalchemy import event
 from sqlalchemy.sql import func
@@ -14,21 +14,23 @@ from app.models.base import SoftDeletionModel
 from app.models.email_notification import EmailNotification
 from app.models.event_topic import EventTopic
 from app.models.feedback import Feedback
-from app.models.helpers.versioning import clean_up_string, clean_html
+from app.models.helpers.versioning import clean_html, clean_up_string
 from app.models.order import Order
 from app.models.search import sync
-from app.models.user import ATTENDEE, ORGANIZER, OWNER
 from app.models.session import Session
 from app.models.speaker import Speaker
 from app.models.ticket import Ticket
-from app.models.ticket_fee import get_fee
-from app.models.ticket_fee import get_maximum_fee
+from app.models.ticket_fee import get_fee, get_maximum_fee
 from app.models.ticket_holder import TicketHolder
+from app.models.user import ATTENDEE, ORGANIZER, OWNER
 
 
 def get_new_event_identifier(length=8):
     identifier = str(binascii.b2a_hex(os.urandom(int(length / 2))), 'utf-8')
-    if not identifier.isdigit() and get_count(Event.query.filter_by(identifier=identifier)) == 0:
+    if (
+        not identifier.isdigit()
+        and get_count(Event.query.filter_by(identifier=identifier)) == 0
+    ):
         return identifier
     else:
         return get_new_event_identifier(length)
@@ -36,12 +38,11 @@ def get_new_event_identifier(length=8):
 
 class Event(SoftDeletionModel):
     """Event object table"""
+
     __tablename__ = 'events'
-    __versioned__ = {
-        'exclude': ['schedule_published_on', 'created_at']
-    }
+    __versioned__ = {'exclude': ['schedule_published_on', 'created_at']}
     id = db.Column(db.Integer, primary_key=True)
-    identifier = db.Column(db.String)
+    identifier = db.Column(db.String, default=get_new_event_identifier)
     name = db.Column(db.String, nullable=False)
     external_event_url = db.Column(db.String)
     logo_url = db.Column(db.String)
@@ -54,6 +55,7 @@ class Event(SoftDeletionModel):
     location_name = db.Column(db.String)
     searchable_location_name = db.Column(db.String)
     is_featured = db.Column(db.Boolean, default=False, nullable=False)
+    is_promoted = db.Column(db.Boolean, default=False, nullable=False)
     description = db.Column(db.Text)
     original_image_url = db.Column(db.String)
     thumbnail_image_url = db.Column(db.String)
@@ -80,12 +82,15 @@ class Event(SoftDeletionModel):
     attendees = db.relationship('TicketHolder', backref="event")
     privacy = db.Column(db.String, default="public")
     state = db.Column(db.String, default="Draft")
-    event_type_id = db.Column(db.Integer, db.ForeignKey('event_types.id', ondelete='CASCADE'))
-    event_topic_id = db.Column(db.Integer, db.ForeignKey('event_topics.id', ondelete='CASCADE'))
-    event_sub_topic_id = db.Column(db.Integer, db.ForeignKey(
-        'event_sub_topics.id', ondelete='CASCADE'))
-    events_orga_id = db.Column(db.Integer, db.ForeignKey(
-        'events_orga.id', ondelete='CASCADE'))
+    event_type_id = db.Column(
+        db.Integer, db.ForeignKey('event_types.id', ondelete='CASCADE')
+    )
+    event_topic_id = db.Column(
+        db.Integer, db.ForeignKey('event_topics.id', ondelete='CASCADE')
+    )
+    event_sub_topic_id = db.Column(
+        db.Integer, db.ForeignKey('event_sub_topics.id', ondelete='CASCADE')
+    )
     ticket_url = db.Column(db.String)
     db.UniqueConstraint('track.name')
     code_of_conduct = db.Column(db.String)
@@ -109,228 +114,130 @@ class Event(SoftDeletionModel):
     cheque_details = db.Column(db.String)
     bank_details = db.Column(db.String)
     onsite_details = db.Column(db.String)
-    created_at = db.Column(db.DateTime(timezone=True))
+    created_at = db.Column(db.DateTime(timezone=True), default=func.now())
     pentabarf_url = db.Column(db.String)
     ical_url = db.Column(db.String)
     xcal_url = db.Column(db.String)
     is_sponsors_enabled = db.Column(db.Boolean, default=False)
-    refund_policy = db.Column(db.String, default='All sales are final. No refunds shall be issued in any case.')
+    refund_policy = db.Column(
+        db.String, default='All sales are final. No refunds shall be issued in any case.'
+    )
     is_stripe_linked = db.Column(db.Boolean, default=False)
-    discount_code_id = db.Column(db.Integer, db.ForeignKey(
-        'discount_codes.id', ondelete='CASCADE'))
-    discount_code = db.relationship('DiscountCode', backref='events', foreign_keys=[discount_code_id])
-    event_type = db.relationship('EventType', backref='event', foreign_keys=[event_type_id])
-    event_topic = db.relationship('EventTopic', backref='event', foreign_keys=[event_topic_id])
+    discount_code_id = db.Column(
+        db.Integer, db.ForeignKey('discount_codes.id', ondelete='CASCADE')
+    )
+    discount_code = db.relationship(
+        'DiscountCode', backref='events', foreign_keys=[discount_code_id]
+    )
+    event_type = db.relationship(
+        'EventType', backref='event', foreign_keys=[event_type_id]
+    )
+    event_topic = db.relationship(
+        'EventTopic', backref='event', foreign_keys=[event_topic_id]
+    )
     event_sub_topic = db.relationship(
-        'EventSubTopic', backref='event', foreign_keys=[event_sub_topic_id])
-    events_orga = db.relationship(
-        'EventOrgaModel', backref='event', foreign_keys=[events_orga_id])
-    owner = db.relationship('User',
-                            viewonly=True,
-                            secondary='join(UsersEventsRoles, Role,'
-                                      ' and_(Role.id == UsersEventsRoles.role_id, Role.name == "owner"))',
-                            primaryjoin='UsersEventsRoles.event_id == Event.id',
-                            secondaryjoin='User.id == UsersEventsRoles.user_id',
-                            backref='owner_events',
-                            uselist=False)
-    organizers = db.relationship('User',
-                                 viewonly=True,
-                                 secondary='join(UsersEventsRoles, Role,'
-                                           ' and_(Role.id == UsersEventsRoles.role_id, Role.name == "organizer"))',
-                                 primaryjoin='UsersEventsRoles.event_id == Event.id',
-                                 secondaryjoin='User.id == UsersEventsRoles.user_id',
-                                 backref='organizer_events')
-    coorganizers = db.relationship('User',
-                                   viewonly=True,
-                                   secondary='join(UsersEventsRoles, Role,'
-                                             ' and_(Role.id == UsersEventsRoles.role_id, Role.name == "coorganizer"))',
-                                   primaryjoin='UsersEventsRoles.event_id == Event.id',
-                                   secondaryjoin='User.id == UsersEventsRoles.user_id',
-                                   backref='coorganizer_events')
-    track_organizers = db.relationship('User',
-                                       viewonly=True,
-                                       secondary='join(UsersEventsRoles, Role,'
-                                                 ' and_(Role.id == UsersEventsRoles.role_id,'
-                                                 ' Role.name == "track_organizer"))',
-                                       primaryjoin='UsersEventsRoles.event_id == Event.id',
-                                       secondaryjoin='User.id == UsersEventsRoles.user_id',
-                                       backref='track_organizer_events')
-    registrars = db.relationship('User',
-                                 viewonly=True,
-                                 secondary='join(UsersEventsRoles, Role,'
-                                           ' and_(Role.id == UsersEventsRoles.role_id, Role.name == "registrar"))',
-                                 primaryjoin='UsersEventsRoles.event_id == Event.id',
-                                 secondaryjoin='User.id == UsersEventsRoles.user_id',
-                                 backref='registrar_events')
-    moderators = db.relationship('User',
-                                 viewonly=True,
-                                 secondary='join(UsersEventsRoles, Role,'
-                                           ' and_(Role.id == UsersEventsRoles.role_id, Role.name == "moderator"))',
-                                 primaryjoin='UsersEventsRoles.event_id == Event.id',
-                                 secondaryjoin='User.id == UsersEventsRoles.user_id',
-                                 backref='moderator_events')
+        'EventSubTopic', backref='event', foreign_keys=[event_sub_topic_id]
+    )
+    owner = db.relationship(
+        'User',
+        viewonly=True,
+        secondary='join(UsersEventsRoles, Role,'
+        ' and_(Role.id == UsersEventsRoles.role_id, Role.name == "owner"))',
+        primaryjoin='UsersEventsRoles.event_id == Event.id',
+        secondaryjoin='User.id == UsersEventsRoles.user_id',
+        backref='owner_events',
+        uselist=False,
+    )
+    organizers = db.relationship(
+        'User',
+        viewonly=True,
+        secondary='join(UsersEventsRoles, Role,'
+        ' and_(Role.id == UsersEventsRoles.role_id, Role.name == "organizer"))',
+        primaryjoin='UsersEventsRoles.event_id == Event.id',
+        secondaryjoin='User.id == UsersEventsRoles.user_id',
+        backref='organizer_events',
+    )
+    coorganizers = db.relationship(
+        'User',
+        viewonly=True,
+        secondary='join(UsersEventsRoles, Role,'
+        ' and_(Role.id == UsersEventsRoles.role_id, Role.name == "coorganizer"))',
+        primaryjoin='UsersEventsRoles.event_id == Event.id',
+        secondaryjoin='User.id == UsersEventsRoles.user_id',
+        backref='coorganizer_events',
+    )
+    track_organizers = db.relationship(
+        'User',
+        viewonly=True,
+        secondary='join(UsersEventsRoles, Role,'
+        ' and_(Role.id == UsersEventsRoles.role_id,'
+        ' Role.name == "track_organizer"))',
+        primaryjoin='UsersEventsRoles.event_id == Event.id',
+        secondaryjoin='User.id == UsersEventsRoles.user_id',
+        backref='track_organizer_events',
+    )
+    registrars = db.relationship(
+        'User',
+        viewonly=True,
+        secondary='join(UsersEventsRoles, Role,'
+        ' and_(Role.id == UsersEventsRoles.role_id, Role.name == "registrar"))',
+        primaryjoin='UsersEventsRoles.event_id == Event.id',
+        secondaryjoin='User.id == UsersEventsRoles.user_id',
+        backref='registrar_events',
+    )
+    moderators = db.relationship(
+        'User',
+        viewonly=True,
+        secondary='join(UsersEventsRoles, Role,'
+        ' and_(Role.id == UsersEventsRoles.role_id, Role.name == "moderator"))',
+        primaryjoin='UsersEventsRoles.event_id == Event.id',
+        secondaryjoin='User.id == UsersEventsRoles.user_id',
+        backref='moderator_events',
+    )
     # staff
-    users = db.relationship('User',
-                            viewonly=True,
-                            secondary='join(UsersEventsRoles, Role,'
-                                      ' and_(Role.id == UsersEventsRoles.role_id, Role.name != "attendee"))',
-                            primaryjoin='UsersEventsRoles.event_id == Event.id',
-                            secondaryjoin='User.id == UsersEventsRoles.user_id',
-                            backref='events')
+    users = db.relationship(
+        'User',
+        viewonly=True,
+        secondary='join(UsersEventsRoles, Role,'
+        ' and_(Role.id == UsersEventsRoles.role_id, Role.name != "attendee"))',
+        primaryjoin='UsersEventsRoles.event_id == Event.id',
+        secondaryjoin='User.id == UsersEventsRoles.user_id',
+        backref='events',
+    )
 
-    def __init__(self,
-                 name=None,
-                 logo_url=None,
-                 starts_at=None,
-                 ends_at=None,
-                 timezone='UTC',
-                 is_event_online=False,
-                 latitude=None,
-                 longitude=None,
-                 location_name=None,
-                 description=None,
-                 external_event_url=None,
-                 original_image_url=None,
-                 thumbnail_image_url=None,
-                 large_image_url=None,
-                 icon_image_url=None,
-                 owner_name=None,
-                 owner_description=None,
-                 state=None,
-                 event_type_id=None,
-                 privacy=None,
-                 event_topic_id=None,
-                 event_sub_topic_id=None,
-                 events_orga_id=None,
-                 ticket_url=None,
-                 copyright=None,
-                 code_of_conduct=None,
-                 schedule_published_on=None,
-                 is_sessions_speakers_enabled=False,
-                 show_remaining_tickets=False,
-                 is_ticket_form_enabled=True,
-                 is_donation_enabled=False,
-                 is_map_shown=False,
-                 has_owner_info=False,
-                 searchable_location_name=None,
-                 is_ticketing_enabled=None,
-                 deleted_at=None,
-                 payment_country=None,
-                 payment_currency=None,
-                 paypal_email=None,
-                 speakers_call=None,
-                 can_pay_by_paypal=False,
-                 can_pay_by_stripe=False,
-                 can_pay_by_cheque=False,
-                 can_pay_by_omise=False,
-                 can_pay_by_alipay=False,
-                 can_pay_by_paytm=False,
-                 identifier=None,
-                 can_pay_by_bank=False,
-                 is_featured=False,
-                 can_pay_onsite=False,
-                 cheque_details=None,
-                 bank_details=None,
-                 pentabarf_url=None,
-                 ical_url=None,
-                 xcal_url=None,
-                 discount_code_id=None,
-                 onsite_details=None,
-                 is_tax_enabled=None,
-                 is_billing_info_mandatory=False,
-                 is_sponsors_enabled=None,
-                 stripe_authorization=None,
-                 tax=None,
-                 refund_policy='All sales are final. No refunds shall be issued in any case.',
-                 is_stripe_linked=False):
+    def __init__(self, **kwargs):
+        super(Event, self).__init__(**kwargs)
 
-        self.name = name
-        self.logo_url = logo_url
-        self.starts_at = starts_at
-        self.ends_at = ends_at
-        self.timezone = timezone
-        self.is_event_online = is_event_online
-        self.latitude = latitude
-        self.longitude = longitude
-        self.location_name = location_name
-        self.description = clean_up_string(description)
-        self.external_event_url = external_event_url
-        self.original_image_url = original_image_url
-        self.original_image_url = self.set_default_event_image(event_topic_id) if original_image_url is None \
+        original_image_url = kwargs.get('original_image_url')
+        self.original_image_url = (
+            self.set_default_event_image(kwargs.get('event_topic_id'))
+            if original_image_url is None
             else original_image_url
-        self.thumbnail_image_url = thumbnail_image_url
-        self.large_image_url = large_image_url
-        self.icon_image_url = icon_image_url
-        self.owner_name = owner_name
-        self.owner_description = clean_up_string(owner_description)
-        self.state = state
-        self.is_map_shown = is_map_shown
-        self.has_owner_info = has_owner_info
-        self.privacy = privacy
-        self.event_type_id = event_type_id
-        self.event_topic_id = event_topic_id
-        self.show_remaining_tickets = show_remaining_tickets
-        self.copyright = copyright
-        self.event_sub_topic_id = event_sub_topic_id
-        self.events_orga_id = events_orga_id
-        self.ticket_url = ticket_url
-        self.code_of_conduct = code_of_conduct
-        self.schedule_published_on = schedule_published_on
-        self.is_sessions_speakers_enabled = is_sessions_speakers_enabled
-        self.searchable_location_name = searchable_location_name
-        self.is_ticketing_enabled = is_ticketing_enabled
-        self.deleted_at = deleted_at
-        self.payment_country = payment_country
-        self.payment_currency = payment_currency
-        self.paypal_email = paypal_email
-        self.speakers_call = speakers_call
-        self.can_pay_by_paypal = can_pay_by_paypal
-        self.can_pay_by_stripe = can_pay_by_stripe
-        self.can_pay_by_cheque = can_pay_by_cheque
-        self.can_pay_by_bank = can_pay_by_bank
-        self.can_pay_onsite = can_pay_onsite
-        self.can_pay_by_omise = can_pay_by_omise
-        self.can_pay_by_alipay = can_pay_by_alipay
-        self.can_pay_by_paytm = can_pay_by_paytm
-        self.is_donation_enabled = is_donation_enabled
-        self.is_featured = is_featured
-        self.is_ticket_form_enabled = is_ticket_form_enabled
-        self.identifier = get_new_event_identifier()
-        self.cheque_details = cheque_details
-        self.bank_details = bank_details
-        self.pentabarf_url = pentabarf_url
-        self.ical_url = ical_url
-        self.xcal_url = xcal_url
-        self.onsite_details = onsite_details
-        self.discount_code_id = discount_code_id
-        self.created_at = datetime.now(pytz.utc)
-        self.is_tax_enabled = is_tax_enabled
-        self.is_billing_info_mandatory = is_billing_info_mandatory
-        self.is_sponsors_enabled = is_sponsors_enabled
-        self.stripe_authorization = stripe_authorization
-        self.tax = tax
-        self.refund_policy = refund_policy
-        self.is_stripe_linked = is_stripe_linked
+        )
+        # TODO(Areeb): Test for cleaning up of these on __init__
+        self.description = clean_up_string(kwargs.get('description'))
+        self.owner_description = clean_up_string(kwargs.get('owner_description'))
+        self.code_of_conduct = clean_up_string(kwargs.get('code_of_conduct'))
 
     def __repr__(self):
         return '<Event %r>' % self.name
 
-    def __str__(self):
-        return self.__repr__()
-
     def __setattr__(self, name, value):
-        if name == 'owner_description' or name == 'description' or name == 'code_of_conduct':
+        if (
+            name == 'owner_description'
+            or name == 'description'
+            or name == 'code_of_conduct'
+        ):
             super(Event, self).__setattr__(name, clean_html(clean_up_string(value)))
         else:
             super(Event, self).__setattr__(name, value)
 
     @classmethod
-    def set_default_event_image(self, event_topic_id):
+    def set_default_event_image(cls, event_topic_id):
         if event_topic_id is None:
             return None
         else:
-            event_topic = EventTopic.query.filter_by(
-                id=event_topic_id).first()
+            event_topic = EventTopic.query.filter_by(id=event_topic_id).first()
             return event_topic.system_image_url
 
     @property
@@ -349,21 +256,37 @@ class Event(SoftDeletionModel):
 
     def notification_settings(self, user_id):
         try:
-            return EmailNotification.query.filter_by(
-                user_id=(login.current_user.id if not user_id else int(user_id))). \
-                filter_by(event_id=self.id).first()
+            return (
+                EmailNotification.query.filter_by(
+                    user_id=(login.current_user.id if not user_id else int(user_id))
+                )
+                .filter_by(event_id=self.id)
+                .first()
+            )
         except:
             return None
 
     def get_average_rating(self):
-        avg = db.session.query(func.avg(Feedback.rating)).filter_by(event_id=self.id).scalar()
+        avg = (
+            db.session.query(func.avg(Feedback.rating))
+            .filter_by(event_id=self.id)
+            .scalar()
+        )
         if avg is not None:
             avg = round(avg, 2)
         return avg
 
     def is_payment_enabled(self):
-        return self.can_pay_by_paypal or self.can_pay_by_stripe or self.can_pay_by_omise or self.can_pay_by_alipay \
-               or self.can_pay_by_cheque or self.can_pay_by_bank or self.can_pay_onsite or self.can_pay_by_paytm
+        return (
+            self.can_pay_by_paypal
+            or self.can_pay_by_stripe
+            or self.can_pay_by_omise
+            or self.can_pay_by_alipay
+            or self.can_pay_by_cheque
+            or self.can_pay_by_bank
+            or self.can_pay_onsite
+            or self.can_pay_by_paytm
+        )
 
     @property
     def average_rating(self):
@@ -400,7 +323,11 @@ class Event(SoftDeletionModel):
 
     @property
     def tickets_sold_object(self):
-        obj = db.session.query(Order.event_id).filter_by(event_id=self.id, status='completed').join(TicketHolder)
+        obj = (
+            db.session.query(Order.event_id)
+            .filter_by(event_id=self.id, status='completed')
+            .join(TicketHolder)
+        )
         return obj
 
     def calc_tickets_sold_count(self):
@@ -409,19 +336,27 @@ class Event(SoftDeletionModel):
 
     def calc_tickets_sold_prev_month(self):
         """Calculate tickets sold in the previous month"""
-        previous_month = datetime.datetime.now().month - 1
+        previous_month = datetime.now().month - 1
         return self.tickets_sold_object.filter_by(completed_at=previous_month).count()
 
     def calc_total_tickets_count(self):
         """Calculate total available tickets for all types of tickets"""
-        total_available = db.session.query(func.sum(Ticket.quantity)).filter_by(event_id=self.id).scalar()
+        total_available = (
+            db.session.query(func.sum(Ticket.quantity))
+            .filter_by(event_id=self.id)
+            .scalar()
+        )
         if total_available is None:
             total_available = 0
         return total_available
 
     def calc_revenue(self):
         """Returns total revenues of all completed orders for the given event"""
-        revenue = db.session.query(func.sum(Order.amount)).filter_by(event_id=self.id, status='completed').scalar()
+        revenue = (
+            db.session.query(func.sum(Order.amount))
+            .filter_by(event_id=self.id, status='completed')
+            .scalar()
+        )
         if revenue is None:
             revenue = 0
         return revenue
@@ -430,7 +365,11 @@ class Event(SoftDeletionModel):
         """Returns revenue of current month. Invoice sent every 1st of the month for the previous month"""
         previous_month = datetime.now().month - 1
         orders = Order.query.filter_by(event_id=self.id, status='completed').all()
-        monthly_revenue = sum([o.amount for o in orders if o.completed_at and o.completed_at.month == previous_month])
+        monthly_revenue = sum(
+            o.amount
+            for o in orders
+            if o.completed_at and o.completed_at.month == previous_month
+        )
         return monthly_revenue
 
     @property
@@ -452,6 +391,14 @@ class Event(SoftDeletionModel):
     @property
     def has_speakers(self):
         return Speaker.query.filter_by(event_id=self.id).count() > 0
+
+    @property
+    def order_statistics(self):
+        return Namespace(id=self.id)
+
+    @property
+    def general_statistics(self):
+        return Namespace(id=self.id)
 
 
 @event.listens_for(Event, 'after_update')

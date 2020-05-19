@@ -7,7 +7,7 @@ env.read_envfile()
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 
-VERSION_NAME = '2.1.0-alpha.0'
+VERSION_NAME = '1.14.0'
 
 LANGUAGES = {
     'en': 'English',
@@ -40,6 +40,8 @@ class Config:
     PRODUCTION = False
     TESTING = False
 
+    SECRET_KEY = env.str('SECRET_KEY', default=None)
+
     CACHING = False
     PROFILE = False
     SQLALCHEMY_RECORD_QUERIES = False
@@ -53,9 +55,7 @@ class Config:
     SERVER_NAME = env('SERVER_NAME', default=None)
     CORS_HEADERS = 'Content-Type'
     SQLALCHEMY_DATABASE_URI = env('DATABASE_URL', default=None)
-    SQLALCHEMY_ENGINE_OPTIONS = {
-        'pool_pre_ping': True
-    }
+    SQLALCHEMY_ENGINE_OPTIONS = {'pool_pre_ping': True}
     SERVE_STATIC = env.bool('SERVE_STATIC', default=False)
     DATABASE_QUERY_TIMEOUT = 0.1
     SENTRY_DSN = env('SENTRY_DSN', default=None)
@@ -68,8 +68,11 @@ class Config:
     SOFT_DELETE = True
     PROPOGATE_ERROR = env.bool('PROPOGATE_ERROR', default=False)
     DASHERIZE_API = True
-    API_PROPOGATE_UNCAUGHT_EXCEPTIONS = env.bool('API_PROPOGATE_UNCAUGHT_EXCEPTIONS', default=True)
+    API_PROPOGATE_UNCAUGHT_EXCEPTIONS = env.bool(
+        'API_PROPOGATE_UNCAUGHT_EXCEPTIONS', default=True
+    )
     ETAG = True
+    SENTRY_TRACES_SAMPLE_RATE = env.float('SENTRY_TRACES_SAMPLE_RATE', default=0.01)
 
     if not SQLALCHEMY_DATABASE_URI:
         print('`DATABASE_URL` either not exported or empty')
@@ -99,8 +102,6 @@ class ProductionConfig(Config):
     MINIFY_PAGE = True
     PRODUCTION = True
     CACHING = True
-
-    # if force on
 
 
 class StagingConfig(ProductionConfig):

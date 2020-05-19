@@ -1,19 +1,21 @@
 from errno import errorcode
 
-from celery.task.control import inspect
 from flask import current_app
 from redis.exceptions import ConnectionError
+from sentry_sdk import capture_exception, capture_message
 
 from app.models import db
-from sentry_sdk import capture_exception, capture_message
+
 
 def health_check_celery():
     """
     Check health status of celery and redis broker
     :return:
     """
+    from app.api.helpers.tasks import celery
+
     try:
-        d = inspect().stats()
+        d = celery.control.inspect().stats()
         if not d:
             capture_message('No running Celery workers were found.')
             return False, 'No running Celery workers were found.'

@@ -1,5 +1,5 @@
-from forex_python.converter import CurrencyCodes
 import arrow
+from forex_python.converter import CurrencyCodes
 
 
 def init_filters(app):
@@ -20,4 +20,5 @@ def init_filters(app):
     def humanize_filter(time):
         if not time:
             return "N/A"
+        # TODO(Areeb): Only usage of arrow. Remove
         return arrow.get(time).humanize()

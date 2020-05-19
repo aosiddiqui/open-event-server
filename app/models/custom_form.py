@@ -1,4 +1,5 @@
 import json
+
 from sqlalchemy.schema import UniqueConstraint
 
 from app.models import db
@@ -15,7 +16,7 @@ SESSION_FORM = {
     "language": {"include": 0, "require": 0},
     "slides": {"include": 1, "require": 0},
     "video": {"include": 0, "require": 0},
-    "audio": {"include": 0, "require": 0}
+    "audio": {"include": 0, "require": 0},
 }
 
 SPEAKER_FORM = {
@@ -32,7 +33,7 @@ SPEAKER_FORM = {
     "facebook": {"include": 0, "require": 0},
     "twitter": {"include": 1, "require": 0},
     "github": {"include": 0, "require": 0},
-    "linkedin": {"include": 0, "require": 0}
+    "linkedin": {"include": 0, "require": 0},
 }
 
 ATTENDEE_FORM = {
@@ -58,6 +59,7 @@ ATTENDEE_FORM = {
     "facebook": {"include": 0, "require": 0},
     "github": {"include": 1, "require": 0},
     "gender": {"include": 0, "require": 0},
+    "age_group": {"include": 0, "require": 0},
 }
 
 session_form_str = json.dumps(SESSION_FORM, separators=(',', ':'))
@@ -67,8 +69,13 @@ attendee_form_str = json.dumps(ATTENDEE_FORM, separators=(',', ':'))
 
 class CustomForms(SoftDeletionModel):
     """custom form model class"""
+
     __tablename__ = 'custom_forms'
-    __table_args__ = (UniqueConstraint('event_id', 'field_identifier', 'form', name='custom_form_identifier'), )
+    __table_args__ = (
+        UniqueConstraint(
+            'event_id', 'field_identifier', 'form', name='custom_form_identifier'
+        ),
+    )
     id = db.Column(db.Integer, primary_key=True)
     field_identifier = db.Column(db.String, nullable=False)
     form = db.Column(db.String, nullable=False)
@@ -81,46 +88,5 @@ class CustomForms(SoftDeletionModel):
     event_id = db.Column(db.Integer, db.ForeignKey('events.id', ondelete='CASCADE'))
     custom_form_options = db.relationship('CustomFormOptions', backref="custom_form")
 
-    def __init__(self,
-                 event_id=None,
-                 field_identifier=None,
-                 form=None,
-                 type=None,
-                 description=None,
-                 is_required=False,
-                 is_included=False,
-                 is_fixed=False,
-                 is_complex=False,
-                 deleted_at=None):
-        self.event_id = event_id
-        self.field_identifier = field_identifier
-        self.form = form
-        self.type = type
-        self.description = description
-        self.is_required = is_required
-        self.is_included = is_included
-        self.is_fixed = is_fixed
-        self.is_complex = is_complex
-        self.deleted_at = deleted_at
-
     def __repr__(self):
         return '<CustomForm %r>' % self.id
-
-    def __str__(self):
-        return self.__repr__()
-
-    @property
-    def serialize(self):
-        """Return object data in easily serializable format"""
-
-        return {
-            'id': self.id,
-            'field_identifier': self.field_identifier,
-            'form': self.form,
-            'type': self.type,
-            'description': self.description,
-            'is_required': self.is_required,
-            'is_included': self.is_included,
-            'is_fixed': self.is_fixed,
-            'is_complex': self.is_complex
-        }

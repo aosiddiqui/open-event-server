@@ -1,7 +1,3 @@
-from datetime import datetime
-
-import pytz
-
 from app.models import db
 from app.models.base import SoftDeletionModel
 
@@ -33,29 +29,33 @@ class NotificationAction(db.Model):
     """
         Model for storing user notification actions.
     """
+
     __tablename__ = 'notification_actions'
 
     id = db.Column(db.Integer, primary_key=True)
 
     action_type = db.Column(db.String)
     subject = db.Column(db.String)
-    subject_id = db.Column(db.String)  # Contains the ID of the related subject, eg. session_id in case of new session.
-    link = db.Column(db.String)  # Contains the link if required to take action. Null in other cases.
+    subject_id = db.Column(
+        db.String
+    )  # Contains the ID of the related subject, eg. session_id in case of new session.
+    link = db.Column(
+        db.String
+    )  # Contains the link if required to take action. Null in other cases.
 
-    notification_id = db.Column(db.Integer, db.ForeignKey('notifications.id', ondelete='CASCADE'))
-    notification = db.relationship('Notification', backref='actions', foreign_keys=[notification_id])
-
-    def __init__(self, action_type=None, subject=None, subject_id=None, link=None):
-        self.action_type = action_type
-        self.subject = subject
-        self.subject_id = subject_id
-        self.link = link
+    notification_id = db.Column(
+        db.Integer, db.ForeignKey('notifications.id', ondelete='CASCADE')
+    )
+    notification = db.relationship(
+        'Notification', backref='actions', foreign_keys=[notification_id]
+    )
 
 
 class Notification(SoftDeletionModel):
     """
         Model for storing user notifications.
     """
+
     __tablename__ = 'notifications'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -68,16 +68,5 @@ class Notification(SoftDeletionModel):
     received_at = db.Column(db.DateTime(timezone=True))
     is_read = db.Column(db.Boolean)
 
-    def __init__(self, user_id=None, title=None, message=None, is_read=False, deleted_at=None):
-        self.user_id = user_id
-        self.title = title
-        self.message = message
-        self.received_at = datetime.now(pytz.utc)
-        self.is_read = is_read
-        self.deleted_at = deleted_at
-
     def __repr__(self):
         return '<Notif %s:%s>' % (self.user, self.title)
-
-    def __str__(self):
-        return self.__repr__()

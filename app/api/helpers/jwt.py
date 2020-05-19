@@ -1,11 +1,7 @@
-import base64
-import json
-
-from flask import _app_ctx_stack as ctx_stack
-from flask_jwt_extended.view_decorators import _decode_jwt_from_request, _load_user
+from flask import _app_ctx_stack as ctx_stack  # pytype: disable=import-error
 from flask_jwt_extended.config import config
 from flask_jwt_extended.exceptions import JWTExtendedException, UserLoadError
-from flask_scrypt import check_password_hash
+from flask_jwt_extended.view_decorators import _decode_jwt_from_request, _load_user
 from jwt.exceptions import PyJWTError
 
 from app.models.user import User
@@ -39,7 +35,7 @@ def get_identity():
     """
     token = None
     try:
-        token, header = _decode_jwt_from_request('access')
+        token, _ = _decode_jwt_from_request('access')
     except (JWTExtendedException, PyJWTError):
         token = getattr(ctx_stack.top, 'expired_jwt', None)
 
